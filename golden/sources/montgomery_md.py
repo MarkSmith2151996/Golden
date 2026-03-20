@@ -39,7 +39,7 @@ class MontgomeryMDSource:
         return self._config
 
     def fetch_establishments(self, limit: int | None = None) -> list[Establishment]:
-        since = date.today() - timedelta(days=365)
+        since = date.today() - timedelta(days=730)  # 2 years — dataset updates infrequently
         rows = self._fetcher.fetch(
             where=f"inspectiondate > '{since.isoformat()}'",
             order="inspectiondate DESC",

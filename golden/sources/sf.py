@@ -1,8 +1,9 @@
-"""San Francisco health inspection data source (Socrata, LIVES Standard)."""
+"""San Francisco health inspection data source (Socrata, 2023-present dataset)."""
 
 from __future__ import annotations
 
 import logging
+import re
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 
@@ -16,7 +17,7 @@ CONFIG = SocrataConfig(
     display_name="San Francisco, CA",
     state="CA",
     base_url="https://data.sfgov.org",
-    dataset_id="pyih-qa8i",
+    dataset_id="tvy3-wexg",
 )
 
 
@@ -44,67 +45,95 @@ def _parse_date(s: str) -> date:
     return datetime.fromisoformat(s.replace(".000", "")).date()
 
 
+def _parse_violation_codes(text: str) -> list[Violation]:
+    """Parse the violation_codes blob into individual Violation objects.
+
+    Format: "114130-114130.5, ... - Description text ... | 114253 - Another desc ..."
+    Each violation block is separated by ' | ' or starts with a code pattern.
+    """
+    if not text:
+        return []
+
+    violations = []
+    # Split on ' | ' which separates distinct violation entries
+    # If no pipes, treat the whole thing as one violation
+    parts = [p.strip() for p in text.split(" | ")] if " | " in text else [text.strip()]
+
+    for part in parts:
+        if not part:
+            continue
+        # Try to extract code and description
+        # Pattern: "CODE(S) - Description text"
+        match = re.match(r'^([\d.,\s-]+?)\s*-\s*(.+)', part)
+        if match:
+            code = match.group(1).strip().rstrip(",- ")
+            desc = match.group(2).strip()
+        else:
+            code = ""
+            desc = part
+
+        if desc:
+            violations.append(Violation(
+                violation_code=code,
+                violation_description=desc[:500],
+                violation_type="Core",
+                item_description=desc[:200],
+                problem_description=desc,
+                area_description="",
+                is_corrected=False,
+            ))
+
+    return violations
+
+
 def _rows_to_establishments(rows: list[dict]) -> list[Establishment]:
-    by_biz: dict[str, list[dict]] = defaultdict(list)
+    """Each row is one inspection (violations are in a text blob)."""
+    by_permit: dict[str, list[dict]] = defaultdict(list)
     for r in rows:
-        bid = r.get("business_id", "")
-        if bid:
-            by_biz[bid].append(r)
+        pid = r.get("permit_number", "")
+        if pid:
+            by_permit[pid].append(r)
 
     establishments = []
-    for bid, biz_rows in by_biz.items():
-        first = biz_rows[0]
-
-        by_insp: dict[str, list[dict]] = defaultdict(list)
-        for r in biz_rows:
-            idate = r.get("inspection_date", "")
-            if idate:
-                by_insp[idate].append(r)
+    for pid, prows in by_permit.items():
+        first = prows[0]
 
         inspections = []
-        for idate_str, insp_rows in by_insp.items():
+        for r in prows:
+            d = r.get("inspection_date", "")
+            if not d:
+                continue
             try:
-                idate = _parse_date(idate_str)
+                idate = _parse_date(d)
             except (ValueError, TypeError):
                 continue
 
-            score_str = insp_rows[0].get("inspection_score", "")
-            try:
-                score = int(float(score_str)) if score_str else 100
-            except ValueError:
-                score = 100
+            viol_text = r.get("violation_codes", "") or ""
+            violations = _parse_violation_codes(viol_text)
 
-            violations = []
-            for r in insp_rows:
-                desc = r.get("violation_description", "")
-                if desc:
-                    risk = r.get("risk_category", "")
-                    vtype = "Priority" if "High" in risk else "Core" if "Low" in risk else "Foundation"
-                    violations.append(Violation(
-                        violation_code=r.get("violation_id", ""),
-                        violation_description=desc,
-                        violation_type=vtype,
-                        item_description=desc,
-                        problem_description=desc,
-                        area_description="",
-                        is_corrected=False,
-                    ))
+            viol_count_str = r.get("violation_count", "0")
+            try:
+                viol_count = int(viol_count_str) if viol_count_str else 0
+            except ValueError:
+                viol_count = 0
 
             inspections.append(Inspection(
-                inspection_id=insp_rows[0].get("inspection_id", f"sf-{bid}-{idate}"),
+                inspection_id=f"sf-{pid}-{idate}",
                 inspection_date=idate,
-                inspection_type=insp_rows[0].get("inspection_type", ""),
-                is_in_compliance=(score >= 90),
+                inspection_type=r.get("permit_type", ""),
+                is_in_compliance=(viol_count == 0),
                 violations=violations,
             ))
 
         inspections.sort(key=lambda i: i.inspection_date, reverse=True)
+        address = (first.get("street_address_clean", "") or
+                   first.get("street_address", "") or "")
         establishments.append(Establishment(
-            establishment_id=f"sf-{bid}",
-            name=first.get("business_name", ""),
-            address=first.get("business_address", ""),
+            establishment_id=f"sf-{pid}",
+            name=first.get("permit_type", ""),
+            address=address.strip(),
             city="sf",
-            zip_code=first.get("business_postal_code", ""),
+            coords=f"{first.get('latitude', '')},{first.get('longitude', '')}" if first.get("latitude") else "",
             inspections=inspections,
         ))
 

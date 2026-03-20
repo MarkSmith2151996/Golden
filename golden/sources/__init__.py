@@ -12,25 +12,21 @@ from __future__ import annotations
 
 from .base import CitySource
 
-# Import all sources
+# Import all active sources
 from .austin import AustinSource
 from .baton_rouge import BatonRougeSource
 from .boulder import BoulderSource
 from .chicago import ChicagoSource
 from .cincinnati import CincinnatiSource
-from .dallas import DallasSource
 from .delaware import DelawareSource
 from .detroit import DetroitSource
-from .fulton_ga import FultonGASource
 from .king_county import KingCountySource
-from .la_city import LACitySource
 from .marin import MarinSource
 from .montgomery_md import MontgomeryMDSource
 from .ny_state import NYStateSource
 from .ny_state_ag import NYStateAgSource
 from .nyc import NYCSource
 from .pg_county_md import PGCountyMDSource
-from .san_mateo import SanMateoSource
 from .santa_clara import SantaClaraSource
 from .sf import SFSource
 
@@ -40,22 +36,24 @@ _REGISTRY: dict[str, type] = {
     "boulder": BoulderSource,
     "chicago": ChicagoSource,
     "cincinnati": CincinnatiSource,
-    "dallas": DallasSource,
     "delaware": DelawareSource,
     "detroit": DetroitSource,
-    "fulton_ga": FultonGASource,
     "king_county": KingCountySource,
-    "la_city": LACitySource,
     "marin": MarinSource,
     "montgomery_md": MontgomeryMDSource,
     "ny_state": NYStateSource,
     "ny_state_ag": NYStateAgSource,
     "nyc": NYCSource,
     "pg_county_md": PGCountyMDSource,
-    "san_mateo": SanMateoSource,
     "santa_clara": SantaClaraSource,
     "sf": SFSource,
 }
+
+# Removed sources (datasets no longer updated):
+# - dallas: Dataset stopped Jan 2024, moved to myhealthdepartment.com (no API)
+# - fulton_ga: All datasets stopped Jan 2022
+# - la_city: Socrata dataset stopped 2018, moved to ArcGIS (needs custom engine)
+# - san_mateo: Dataset stopped Jan 2022
 
 
 def get_source(city: str) -> CitySource:

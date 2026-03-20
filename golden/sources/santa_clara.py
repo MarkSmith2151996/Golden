@@ -1,5 +1,7 @@
 """Santa Clara County, CA health inspection data source (Socrata).
-Uses two datasets: inspections (2u2d-8jej) and violations (wkaa-4ccv)."""
+Uses two datasets: inspections (2u2d-8jej) and violations (wkaa-4ccv).
+
+Note: The inspections dataset has a typo — field is 'inpsection_id' not 'inspection_id'."""
 
 from __future__ import annotations
 
@@ -51,20 +53,37 @@ class SantaClaraSource:
             limit=limit,
         )
 
-        # Fetch violations
-        viol_rows = self._viol_fetcher.fetch(limit=limit)
-
-        # Index violations by inspection_id
-        viols_by_insp: dict[str, list[dict]] = defaultdict(list)
-        for v in viol_rows:
-            iid = v.get("inspection_id", "")
+        # Collect all inspection IDs (field has typo: 'inpsection_id')
+        insp_ids = set()
+        for r in insp_rows:
+            iid = r.get("inpsection_id", "")
             if iid:
-                viols_by_insp[iid].append(v)
+                insp_ids.add(iid)
+
+        # Fetch violations matching those inspection IDs
+        viols_by_insp: dict[str, list[dict]] = defaultdict(list)
+        if insp_ids:
+            # Fetch violations in batches using SoQL IN clause
+            id_list = list(insp_ids)
+            batch_size = 50
+            for i in range(0, len(id_list), batch_size):
+                batch = id_list[i:i + batch_size]
+                quoted = ", ".join(f"'{iid}'" for iid in batch)
+                where = f"inspection_id IN ({quoted})"
+                viol_rows = self._viol_fetcher.fetch(where=where, limit=limit)
+                for v in viol_rows:
+                    vid = v.get("inspection_id", "")
+                    if vid:
+                        viols_by_insp[vid].append(v)
 
         return _build_establishments(insp_rows, viols_by_insp)
 
 
 def _parse_date(s: str) -> date:
+    # Santa Clara dates can be YYYYMMDD or ISO format
+    s = s.strip()
+    if len(s) == 8 and s.isdigit():
+        return date(int(s[:4]), int(s[4:6]), int(s[6:8]))
     return datetime.fromisoformat(s.replace(".000", "")).date()
 
 
@@ -89,7 +108,7 @@ def _build_establishments(
             except (ValueError, TypeError):
                 continue
 
-            iid = r.get("inpsection_id", "") or r.get("inspection_id", "")  # note typo in data
+            iid = r.get("inpsection_id", "")  # typo in their data
             score_str = r.get("score", "100")
             try:
                 score = int(float(score_str)) if score_str else 100
