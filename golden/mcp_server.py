@@ -1,5 +1,5 @@
 """
-Golden MCP Server — exposes the lead-generation pipeline to Claude Code.
+Golden MCP Server — exposes the data collection pipeline to Claude Code.
 
 Run standalone:  python golden/mcp_server.py
 Register:        claude mcp add golden -- .venv/bin/python golden/mcp_server.py
@@ -47,56 +47,43 @@ async def golden_run_pipeline(
     cities: list[str] | None = None,
     days: int = 90,
     limit: int | None = None,
-    min_severity: int = 1,
 ) -> str:
-    """Run the Golden lead-generation pipeline for specified cities.
+    """Run the Golden data collection pipeline for specified cities.
 
     Args:
-        cities: Cities to process (default: all). Options: chicago, detroit, nyc
+        cities: Cities to process (default: all). Options: austin, baton_rouge, boulder, chicago, cincinnati, dallas, delaware, detroit, fulton_ga, king_county, la_city, marin, montgomery_md, ny_state, ny_state_ag, nyc, pg_county_md, san_mateo, santa_clara, sf
         days: Look-back window in days (default: 90)
         limit: Max records per city (useful for quick tests)
-        min_severity: Minimum severity score to qualify as a lead (default: 1)
     """
     from golden.pipeline import run_pipeline
 
-    leads = await asyncio.to_thread(
+    results = await asyncio.to_thread(
         run_pipeline,
         cities=cities,
         days=days,
         limit=limit,
-        min_severity=min_severity,
     )
-    _cache(leads)
+    _cache(results)
 
     # Build per-city counts
     city_counts: Counter[str] = Counter()
-    for lead in leads:
-        city_counts[lead.get("city", "unknown")] += 1
+    total_inspections = 0
+    total_violations = 0
+    for est in results:
+        city_counts[est.get("city", "unknown")] += 1
+        for insp in est.get("inspections", []):
+            total_inspections += 1
+            total_violations += len(insp.get("violations", []))
 
     lines = [
-        f"Pipeline complete: {len(leads)} leads found",
+        f"Pipeline complete: {len(results)} establishments collected",
+        f"Total inspections: {total_inspections}",
+        f"Total violations: {total_violations}",
         "",
         "Per-city breakdown:",
     ]
     for city, count in sorted(city_counts.items()):
-        lines.append(f"  {city}: {count} leads")
-
-    # Top leads
-    top = leads[:10]
-    if top:
-        lines.append("")
-        lines.append("Top leads (by severity):")
-        for i, lead in enumerate(top, 1):
-            est = lead.get("establishment", {})
-            name = est.get("name", "Unknown")
-            addr = est.get("address", "")
-            score = lead.get("severity_score", 0)
-            city = lead.get("city", "")
-            n_violations = len(lead.get("relevant_violations", []))
-            lines.append(
-                f"  {i}. {name} ({city}) — severity {score}, "
-                f"{n_violations} violations, {addr}"
-            )
+        lines.append(f"  {city}: {count} establishments")
 
     return "\n".join(lines)
 
@@ -121,84 +108,70 @@ async def golden_list_cities() -> str:
 
 
 @mcp.tool()
-async def golden_summarize_leads(
+async def golden_summarize_data(
     cities: list[str] | None = None,
     days: int = 90,
     limit: int | None = None,
-    min_severity: int = 1,
 ) -> str:
     """Run the pipeline and return a human-readable summary with stats.
 
     Args:
-        cities: Cities to process (default: all). Options: chicago, detroit, nyc
+        cities: Cities to process (default: all). Options: austin, baton_rouge, boulder, chicago, cincinnati, dallas, delaware, detroit, fulton_ga, king_county, la_city, marin, montgomery_md, ny_state, ny_state_ag, nyc, pg_county_md, san_mateo, santa_clara, sf
         days: Look-back window in days (default: 90)
         limit: Max records per city (useful for quick tests)
-        min_severity: Minimum severity score to qualify as a lead (default: 1)
     """
     from golden.pipeline import run_pipeline
 
-    leads = await asyncio.to_thread(
+    results = await asyncio.to_thread(
         run_pipeline,
         cities=cities,
         days=days,
         limit=limit,
-        min_severity=min_severity,
     )
-    _cache(leads)
+    _cache(results)
 
-    if not leads:
-        return "No leads found with the given parameters."
+    if not results:
+        return "No data collected with the given parameters."
 
     # Per-city breakdown
     city_counts: Counter[str] = Counter()
-    violation_types: Counter[str] = Counter()
+    total_inspections = 0
     total_violations = 0
-    corrected = 0
-    uncorrected = 0
+    violation_types: Counter[str] = Counter()
+    compliance_yes = 0
+    compliance_no = 0
 
-    for lead in leads:
-        city_counts[lead.get("city", "unknown")] += 1
-        for v in lead.get("relevant_violations", []):
-            total_violations += 1
-            vtype = v.get("violation_type", "Unknown")
-            violation_types[vtype] += 1
-            if v.get("is_corrected"):
-                corrected += 1
+    for est in results:
+        city_counts[est.get("city", "unknown")] += 1
+        for insp in est.get("inspections", []):
+            total_inspections += 1
+            if insp.get("is_in_compliance"):
+                compliance_yes += 1
             else:
-                uncorrected += 1
+                compliance_no += 1
+            for v in insp.get("violations", []):
+                total_violations += 1
+                vtype = v.get("violation_type", "Unknown")
+                violation_types[vtype] += 1
 
     lines = [
-        "=== Golden Pipeline Summary ===",
+        "=== Golden Data Summary ===",
         "",
-        f"Total leads: {len(leads)}",
-        f"Total cleaning-relevant violations: {total_violations}",
+        f"Total establishments: {len(results)}",
+        f"Total inspections: {total_inspections}",
+        f"Total violations: {total_violations}",
+        f"In compliance: {compliance_yes} | Not in compliance: {compliance_no}",
         "",
         "Per-city breakdown:",
     ]
     for city, count in sorted(city_counts.items()):
-        lines.append(f"  {city}: {count} leads")
+        lines.append(f"  {city}: {count} establishments")
 
-    lines.append("")
-    lines.append("Violation type distribution:")
-    for vtype, count in violation_types.most_common():
-        lines.append(f"  {vtype}: {count}")
-
-    lines.append("")
-    lines.append(f"Corrected: {corrected} | Uncorrected: {uncorrected}")
-    if total_violations > 0:
-        pct = uncorrected / total_violations * 100
-        lines.append(f"Uncorrected rate: {pct:.1f}%")
-
-    # Top 10
-    lines.append("")
-    lines.append("Top 10 leads (by severity):")
-    for i, lead in enumerate(leads[:10], 1):
-        est = lead.get("establishment", {})
-        name = est.get("name", "Unknown")
-        score = lead.get("severity_score", 0)
-        city = lead.get("city", "")
-        n_v = len(lead.get("relevant_violations", []))
-        lines.append(f"  {i}. {name} ({city}) — severity {score}, {n_v} violations")
+    if violation_types:
+        lines.append("")
+        lines.append("Violation type distribution:")
+        for vtype, count in violation_types.most_common():
+            lines.append(f"  {vtype}: {count}")
 
     return "\n".join(lines)
 
@@ -208,7 +181,7 @@ async def golden_check_source(city: str) -> str:
     """Test connectivity to a city's data source.
 
     Args:
-        city: City name to check (chicago, detroit, nyc)
+        city: City name to check (e.g. chicago, detroit, nyc, sf, austin)
     """
     import httpx
 
@@ -239,7 +212,6 @@ async def golden_check_source(city: str) -> str:
         if isinstance(data, list):
             count = len(data)
         elif isinstance(data, dict):
-            # Gatsby wraps data in nested structure
             count = 1
         else:
             count = 0
@@ -270,28 +242,26 @@ async def golden_check_source(city: str) -> str:
 async def golden_get_last_run() -> str:
     """Return cached results from the most recent pipeline run (avoids re-fetching)."""
     if _last_run is None:
-        return "No cached results. Run golden_run_pipeline or golden_summarize_leads first."
+        return "No cached results. Run golden_run_pipeline first."
 
     city_counts: Counter[str] = Counter()
-    for lead in _last_run:
-        city_counts[lead.get("city", "unknown")] += 1
+    total_inspections = 0
+    total_violations = 0
+    for est in _last_run:
+        city_counts[est.get("city", "unknown")] += 1
+        for insp in est.get("inspections", []):
+            total_inspections += 1
+            total_violations += len(insp.get("violations", []))
 
     lines = [
-        f"Cached results: {len(_last_run)} leads",
+        f"Cached results: {len(_last_run)} establishments",
+        f"Total inspections: {total_inspections}",
+        f"Total violations: {total_violations}",
         "",
         "Per-city breakdown:",
     ]
     for city, count in sorted(city_counts.items()):
-        lines.append(f"  {city}: {count} leads")
-
-    lines.append("")
-    lines.append("Top 5 leads:")
-    for i, lead in enumerate(_last_run[:5], 1):
-        est = lead.get("establishment", {})
-        name = est.get("name", "Unknown")
-        score = lead.get("severity_score", 0)
-        city = lead.get("city", "")
-        lines.append(f"  {i}. {name} ({city}) — severity {score}")
+        lines.append(f"  {city}: {count} establishments")
 
     return "\n".join(lines)
 
@@ -300,40 +270,30 @@ async def golden_get_last_run() -> str:
 async def golden_violation_stats() -> str:
     """Analyze violation patterns from the last pipeline run."""
     if _last_run is None:
-        return "No cached results. Run golden_run_pipeline or golden_summarize_leads first."
+        return "No cached results. Run golden_run_pipeline first."
 
     violation_types: Counter[str] = Counter()
     violation_codes: Counter[str] = Counter()
     corrected = 0
     uncorrected = 0
-    severity_buckets: Counter[str] = Counter()
 
-    for lead in _last_run:
-        score = lead.get("severity_score", 0)
-        if score >= 10:
-            severity_buckets["critical (10+)"] += 1
-        elif score >= 5:
-            severity_buckets["high (5-9)"] += 1
-        elif score >= 3:
-            severity_buckets["medium (3-4)"] += 1
-        else:
-            severity_buckets["low (1-2)"] += 1
-
-        for v in lead.get("relevant_violations", []):
-            violation_types[v.get("violation_type", "Unknown")] += 1
-            code = v.get("violation_code", "")
-            if code:
-                violation_codes[code] += 1
-            if v.get("is_corrected"):
-                corrected += 1
-            else:
-                uncorrected += 1
+    for est in _last_run:
+        for insp in est.get("inspections", []):
+            for v in insp.get("violations", []):
+                violation_types[v.get("violation_type", "Unknown")] += 1
+                code = v.get("violation_code", "")
+                if code:
+                    violation_codes[code] += 1
+                if v.get("is_corrected"):
+                    corrected += 1
+                else:
+                    uncorrected += 1
 
     total = corrected + uncorrected
     lines = [
         "=== Violation Statistics ===",
         "",
-        f"Total violations analyzed: {total}",
+        f"Total violations: {total}",
         f"Corrected: {corrected} | Uncorrected: {uncorrected}",
     ]
     if total > 0:
@@ -346,14 +306,8 @@ async def golden_violation_stats() -> str:
 
     lines.append("")
     lines.append("Most common violation codes:")
-    for code, count in violation_codes.most_common(10):
+    for code, count in violation_codes.most_common(15):
         lines.append(f"  {code}: {count}")
-
-    lines.append("")
-    lines.append("Lead severity distribution:")
-    for bucket in ["critical (10+)", "high (5-9)", "medium (3-4)", "low (1-2)"]:
-        count = severity_buckets.get(bucket, 0)
-        lines.append(f"  {bucket}: {count}")
 
     return "\n".join(lines)
 

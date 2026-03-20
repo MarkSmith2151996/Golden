@@ -1,5 +1,5 @@
 """
-Golden Lead Finder — Tkinter GUI.
+Golden Data Explorer — Tkinter GUI.
 
 Launch:  python -m golden.gui
 """
@@ -22,7 +22,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 class GoldenApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Golden Lead Finder")
+        self.title("Golden Data Explorer")
         self.geometry("960x700")
         self.minsize(800, 550)
 
@@ -67,15 +67,9 @@ class GoldenApp(tk.Tk):
             side="left", padx=(2, 12)
         )
 
-        ttk.Label(param_frame, text="Min Severity:").pack(side="left")
-        self._minsev_var = tk.StringVar(value="1")
-        ttk.Entry(param_frame, textvariable=self._minsev_var, width=6).pack(
-            side="left", padx=(2, 12)
-        )
-
         # Buttons
         self._run_btn = ttk.Button(
-            param_frame, text="Run Pipeline", command=self._on_run
+            param_frame, text="Collect Data", command=self._on_run
         )
         self._run_btn.pack(side="right", padx=(12, 0))
 
@@ -97,7 +91,7 @@ class GoldenApp(tk.Tk):
         container = ttk.Frame(self)
         container.pack(fill="both", expand=True, padx=8)
 
-        cols = ("#", "Sev", "City", "Name", "Address", "Date", "Violations")
+        cols = ("#", "City", "Name", "Address", "Inspections", "Violations")
         self._tree = ttk.Treeview(
             container, columns=cols, show="headings", selectmode="browse"
         )
@@ -105,12 +99,11 @@ class GoldenApp(tk.Tk):
             self._tree.heading(col, text=col)
 
         self._tree.column("#", width=40, stretch=False)
-        self._tree.column("Sev", width=40, stretch=False)
-        self._tree.column("City", width=70, stretch=False)
-        self._tree.column("Name", width=200)
-        self._tree.column("Address", width=220)
-        self._tree.column("Date", width=90, stretch=False)
-        self._tree.column("Violations", width=70, stretch=False)
+        self._tree.column("City", width=90, stretch=False)
+        self._tree.column("Name", width=220)
+        self._tree.column("Address", width=240)
+        self._tree.column("Inspections", width=80, stretch=False)
+        self._tree.column("Violations", width=80, stretch=False)
 
         vsb = ttk.Scrollbar(container, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=vsb.set)
@@ -123,10 +116,10 @@ class GoldenApp(tk.Tk):
     # ── Detail panel ─────────────────────────────────────────────────
 
     def _build_detail(self) -> None:
-        frame = ttk.LabelFrame(self, text="Violation Details (click a row above)", padding=4)
+        frame = ttk.LabelFrame(self, text="Inspection Details (click a row above)", padding=4)
         frame.pack(fill="x", padx=8, pady=(0, 8))
 
-        self._detail = tk.Text(frame, height=8, wrap="word", state="disabled")
+        self._detail = tk.Text(frame, height=10, wrap="word", state="disabled")
         self._detail.pack(fill="x")
 
     # ── Actions ──────────────────────────────────────────────────────
@@ -145,26 +138,15 @@ class GoldenApp(tk.Tk):
 
         limit_str = self._limit_var.get().strip()
         limit = int(limit_str) if limit_str else None
-        if limit_str and limit is None:
-            messagebox.showerror("Invalid input", "Limit must be an integer.")
-            return
-
-        try:
-            min_sev = int(self._minsev_var.get())
-        except ValueError:
-            messagebox.showerror("Invalid input", "Min Severity must be an integer.")
-            return
 
         self._run_btn.configure(state="disabled")
         self._export_btn.configure(state="disabled")
-        self._status_var.set("Running...")
+        self._status_var.set("Collecting data...")
         self._clear_results()
 
         def worker() -> None:
             try:
-                results = run_pipeline(
-                    cities=cities, days=days, limit=limit, min_severity=min_sev
-                )
+                results = run_pipeline(cities=cities, days=days, limit=limit)
                 self.after(0, self._load_results, results)
             except Exception as exc:
                 self.after(0, self._on_error, str(exc))
@@ -173,23 +155,33 @@ class GoldenApp(tk.Tk):
 
     def _load_results(self, results: list[dict]) -> None:
         self._results = results
-        for i, lead in enumerate(results, 1):
-            est = lead["establishment"]
+        for i, est in enumerate(results, 1):
+            n_insp = len(est.get("inspections", []))
+            n_viol = sum(
+                len(insp.get("violations", []))
+                for insp in est.get("inspections", [])
+            )
             self._tree.insert(
                 "",
                 "end",
                 iid=str(i),
                 values=(
                     i,
-                    lead["severity_score"],
-                    lead.get("city", ""),
-                    est["name"],
-                    est["address"],
-                    lead["latest_inspection_date"],
-                    len(lead["relevant_violations"]),
+                    est.get("city", ""),
+                    est.get("name", ""),
+                    est.get("address", ""),
+                    n_insp,
+                    n_viol,
                 ),
             )
-        self._status_var.set(f"Done: {len(results)} leads found")
+        total_v = sum(
+            len(insp.get("violations", []))
+            for est in results
+            for insp in est.get("inspections", [])
+        )
+        self._status_var.set(
+            f"Done: {len(results)} establishments, {total_v} violations"
+        )
         self._run_btn.configure(state="normal")
         if results:
             self._export_btn.configure(state="normal")
@@ -209,21 +201,29 @@ class GoldenApp(tk.Tk):
         if not sel:
             return
         idx = int(sel[0]) - 1
-        lead = self._results[idx]
+        est = self._results[idx]
 
         lines: list[str] = []
-        for v in lead["relevant_violations"]:
-            lines.append(
-                f"- Code: {v['violation_code']}  Type: {v['violation_type']}"
-            )
-            lines.append(f"  {v['violation_description']}")
-            if v.get("problem_description"):
-                lines.append(f"  Comments: {v['problem_description']}")
+        for insp in est.get("inspections", []):
+            date_str = insp.get("inspection_date", "?")
+            itype = insp.get("inspection_type", "")
+            compliant = "Yes" if insp.get("is_in_compliance") else "No"
+            n_v = len(insp.get("violations", []))
+            lines.append(f"[{date_str}] {itype}  |  Compliant: {compliant}  |  {n_v} violations")
+
+            for v in insp.get("violations", []):
+                code = v.get("violation_code", "")
+                vtype = v.get("violation_type", "")
+                desc = v.get("violation_description", "")
+                lines.append(f"  - [{vtype}] {code}: {desc}")
+                problem = v.get("problem_description", "")
+                if problem and problem != desc:
+                    lines.append(f"    {problem}")
             lines.append("")
 
         self._detail.configure(state="normal")
         self._detail.delete("1.0", "end")
-        self._detail.insert("1.0", "\n".join(lines) if lines else "(no violations)")
+        self._detail.insert("1.0", "\n".join(lines) if lines else "(no inspections)")
         self._detail.configure(state="disabled")
 
     def _on_export(self) -> None:
@@ -237,7 +237,7 @@ class GoldenApp(tk.Tk):
             return
         with open(path, "w") as f:
             json.dump(self._results, f, indent=2)
-        self._status_var.set(f"Exported {len(self._results)} leads to {path}")
+        self._status_var.set(f"Exported {len(self._results)} establishments to {path}")
 
 
 def main() -> None:

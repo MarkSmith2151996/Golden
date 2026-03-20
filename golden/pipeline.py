@@ -1,12 +1,12 @@
 """
-Main data pipeline — multi-city orchestration.
+Main data pipeline — multi-city data collection.
 
 Usage:
     python -m golden                              # all cities
     python -m golden --city detroit               # Detroit only
     python -m golden --city nyc chicago           # NYC + Chicago
     python -m golden --city nyc --limit 100       # test with 100 records
-    python -m golden --days 90 -o leads.json      # all cities, 90 days, file output
+    python -m golden --days 365 -o data.json      # all cities, 1 year, file output
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ import logging
 import sys
 from datetime import date, timedelta
 
-from .filter import filter_establishment
 from .sources import get_source, list_cities
 
 logging.basicConfig(
@@ -31,21 +30,17 @@ def run_pipeline(
     cities: list[str] | None = None,
     days: int = 90,
     limit: int | None = None,
-    min_severity: int = 1,
 ) -> list[dict]:
     """
-    Run the full data collection pipeline across one or more cities.
+    Run data collection across one or more cities.
 
-    1. For each city: fetch establishments via its CitySource
-    2. Parse into structured models (handled inside each source)
-    3. Filter for cleaning-relevant violations
-    4. Return sorted leads (highest severity first) across all cities
+    Returns a flat list of establishment dicts, each with their
+    inspections and violations nested inside.
     """
     if cities is None:
         cities = list_cities()
 
-    since = date.today() - timedelta(days=days)
-    all_leads = []
+    all_establishments = []
 
     for city_name in cities:
         try:
@@ -53,38 +48,27 @@ def run_pipeline(
             source = get_source(city_name)
             establishments = source.fetch_establishments(limit=limit)
 
-            city_leads = 0
             for est in establishments:
-                lead = filter_establishment(
-                    est, since=since, min_severity=min_severity
-                )
-                if lead:
-                    lead.city = city_name
-                    all_leads.append(lead)
-                    city_leads += 1
+                all_establishments.append(est.model_dump(mode="json"))
 
             logger.info(
-                f"--- {city_name}: {len(establishments)} establishments, "
-                f"{city_leads} leads ---"
+                f"--- {city_name}: {len(establishments)} establishments ---"
             )
 
         except Exception:
             logger.exception(f"Failed to process {city_name} — skipping")
 
-    # Sort by severity across all cities (highest first)
-    all_leads.sort(key=lambda l: l.severity_score, reverse=True)
-
     logger.info(
         f"Pipeline complete: {len(cities)} cities, "
-        f"{len(all_leads)} total leads (since {since})"
+        f"{len(all_establishments)} total establishments"
     )
 
-    return [lead.model_dump(mode="json") for lead in all_leads]
+    return all_establishments
 
 
 def main():
     available = list_cities()
-    parser = argparse.ArgumentParser(description="Golden data pipeline")
+    parser = argparse.ArgumentParser(description="Golden data collection pipeline")
     parser.add_argument(
         "--city",
         nargs="*",
@@ -102,12 +86,6 @@ def main():
         help="Limit records per city (for testing)",
     )
     parser.add_argument(
-        "--min-severity",
-        type=int,
-        default=1,
-        help="Minimum severity score (default: 1)",
-    )
-    parser.add_argument(
         "--output",
         "-o",
         type=str,
@@ -116,18 +94,17 @@ def main():
     )
     args = parser.parse_args()
 
-    leads = run_pipeline(
+    results = run_pipeline(
         cities=args.city,
         days=args.days,
         limit=args.limit,
-        min_severity=args.min_severity,
     )
 
-    output = json.dumps(leads, indent=2)
+    output = json.dumps(results, indent=2)
     if args.output:
         with open(args.output, "w") as f:
             f.write(output)
-        logger.info(f"Wrote {len(leads)} leads to {args.output}")
+        logger.info(f"Wrote {len(results)} establishments to {args.output}")
     else:
         print(output)
 
