@@ -121,18 +121,45 @@ Build a data collection and processing pipeline that:
 4. Deduplicates to avoid repeat contact for the same violation cycle
 5. Outputs a clean, actionable lead list
 
-### 7.2 Step 1 — Detroit Open Data API
+### 7.2 Data Sources — Multi-City Pipeline
 
-Connect to the Detroit Open Data health inspection endpoint and pull recent data.
+The pipeline supports **20 cities/counties** across two source types:
 
-**Data points to extract per record:**
-- Restaurant name
-- Address
-- Violation type
-- Violation date
-- Severity level
+**Socrata SODA API (19 sources):**
+| City/County | State | Dataset ID |
+|-------------|-------|------------|
+| Austin | TX | `ecmv-9xxi` |
+| Baton Rouge | LA | `ux2t-b9wr` |
+| Boulder County | CO | `tuvj-xz3m` |
+| Chicago | IL | `4ijn-s7e5` |
+| Cincinnati | OH | `rg6p-b3h3` |
+| Dallas | TX | `dri5-wcct` |
+| Delaware (statewide) | DE | `384s-wygj` |
+| Fulton County (Atlanta) | GA | `eyfj-j5ac` |
+| King County (Seattle) | WA | `f29f-zza5` |
+| Los Angeles City | CA | `29fd-3paw` |
+| Marin County | CA | `73zb-z5me` |
+| Montgomery County | MD | `5pue-gfbe` |
+| New York City | NY | `43nn-pn8j` |
+| NY State Health Dept | NY | `cnih-y5dw` |
+| NY State Agriculture | NY | `d6dy-3h7r` |
+| Prince George's County | MD | `umjn-t2iz` |
+| San Francisco | CA | `pyih-qa8i` |
+| San Mateo County | CA | `pjzf-pe8z` |
+| Santa Clara County | CA | `2u2d-8jej` + `wkaa-4ccv` |
 
-**Starting source:** Detroit Open Data Portal (https://data.detroitmi.gov/)
+**Gatsby Static JSON (1 source):**
+| City | Source |
+|------|--------|
+| Detroit | `detroitrestaurantinspections.netlify.app` |
+
+All Socrata sources use a shared `SocrataFetcher` class that handles pagination, rate limiting, and SoQL queries. Detroit uses a custom sequential scraper with throttling and retry logic.
+
+**Data points extracted per record:**
+- Restaurant name, address, zip code
+- Violation type, description, code
+- Violation date and severity level
+- Corrected status (where available)
 
 ### 7.3 Step 2 — Data Cleaning & Filtering
 
@@ -233,16 +260,18 @@ Golden's reputation depends on the quality of referred cleaning companies. A bad
 
 | # | Action Item | Target | Status |
 |---|------------|--------|--------|
-| 1 | Access Detroit Open Data API — find health inspection endpoint and pull sample data | This week | **Active** |
-| 2 | Parse and filter violation data — identify which violation types indicate cleaning needs | This week | Pending |
-| 3 | Build scraper that runs on schedule and outputs clean lead list | Week 2 | Pending |
-| 4 | Draft outreach messaging — 2-3 variants for A/B testing | Week 2 | Pending |
-| 5 | Research and contact 3-5 local cleaning companies for partnerships | Week 3 | Pending |
-| 6 | Build outreach automation (email triggered by new violations) | Week 3-4 | Pending |
-| 7 | Launch pilot — run system on Detroit data, track conversion | Week 4-5 | Pending |
-| 8 | Iterate based on conversion data — refine messaging, expand cleaning partners | Ongoing | Pending |
-| 9 | Expand to Wayne County and Macomb County data sources | Month 2-3 | Pending |
-| 10 | Document everything as a case study | Ongoing | Pending |
+| 1 | Access Detroit Open Data API — find health inspection endpoint and pull sample data | Week 1 | **Done** |
+| 2 | Parse and filter violation data — identify which violation types indicate cleaning needs | Week 1 | **Done** |
+| 3 | Build multi-city pipeline with Socrata + Gatsby sources | Week 1 | **Done** (20 cities) |
+| 4 | Build MCP server for Claude Code pipeline interaction | Week 1 | **Done** |
+| 5 | Build Tkinter GUI for manual pipeline operation | Week 1 | **Done** |
+| 6 | Expand to all available Socrata cities (17 new sources) | Week 1 | **Done** |
+| 7 | Build custom engines for non-Socrata cities (e.g. Wayne County, Macomb County) | Week 2 | Pending |
+| 8 | Draft outreach messaging — 2-3 variants for A/B testing | Week 2 | Pending |
+| 9 | Research and contact 3-5 local cleaning companies for partnerships | Week 3 | Pending |
+| 10 | Build outreach automation (email triggered by new violations) | Week 3-4 | Pending |
+| 11 | Launch pilot — run system on Detroit data, track conversion | Week 4-5 | Pending |
+| 12 | Iterate based on conversion data — refine messaging, expand cleaning partners | Ongoing | Pending |
 
 ---
 
@@ -264,3 +293,9 @@ Tracks all key decisions made during development discussions.
 | 2 | Multi-decade strategic arc (Phases 0-6) removed — out of scope for this project | 2026-03-19 |
 | 3 | "Strategic Value / AI-BPO training ground" framing removed — Golden stands on its own | 2026-03-19 |
 | 4 | Starting with Phase 1 (Data Pipeline) — nothing else until this works | 2026-03-19 |
+| 5 | Data source: Detroit Gatsby app static JSON (not traditional API) | 2026-03-19 |
+| 6 | Filter uses FDA violation code matching + keyword matching for cross-city compatibility | 2026-03-19 |
+| 7 | Severity scoring: Priority=3, Foundation=2, Core=1, uncorrected=+1 bonus | 2026-03-19 |
+| 8 | Multi-city expansion: Socrata-first strategy — implement all available Socrata cities first, then build custom engines for harder sources | 2026-03-19 |
+| 9 | Expanded to 20 cities/counties across 12 states using Socrata SODA API + Detroit Gatsby | 2026-03-20 |
+| 10 | MCP server built for Claude Code integration — 6 tools for pipeline interaction | 2026-03-19 |

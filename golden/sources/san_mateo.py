@@ -1,0 +1,107 @@
+"""San Mateo County, CA health inspection data source (Socrata)."""
+
+from __future__ import annotations
+
+import logging
+from collections import defaultdict
+from datetime import date, datetime, timedelta
+
+from ..models import Establishment, Inspection, Violation
+from .base import SocrataConfig, SocrataFetcher
+
+logger = logging.getLogger(__name__)
+
+CONFIG = SocrataConfig(
+    city_name="san_mateo",
+    display_name="San Mateo County, CA",
+    state="CA",
+    base_url="https://datahub.smcgov.org",
+    dataset_id="pjzf-pe8z",
+)
+
+
+class SanMateoSource:
+    def __init__(self, app_token: str = ""):
+        cfg = SocrataConfig(**{**CONFIG.__dict__, "app_token": app_token})
+        self._config = cfg
+        self._fetcher = SocrataFetcher(cfg)
+
+    @property
+    def config(self) -> SocrataConfig:
+        return self._config
+
+    def fetch_establishments(self, limit: int | None = None) -> list[Establishment]:
+        since = date.today() - timedelta(days=365)
+        rows = self._fetcher.fetch(
+            where=f"activity_date > '{since.isoformat()}'",
+            order="activity_date DESC",
+            limit=limit,
+        )
+        return _rows_to_establishments(rows)
+
+
+def _parse_date(s: str) -> date:
+    return datetime.fromisoformat(s.replace(".000", "")).date()
+
+
+def _rows_to_establishments(rows: list[dict]) -> list[Establishment]:
+    by_fac: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        name = r.get("facility_name1", "")
+        addr = r.get("site_address", "")
+        key = f"{name}|{addr}"
+        by_fac[key].append(r)
+
+    establishments = []
+    for key, fac_rows in by_fac.items():
+        first = fac_rows[0]
+
+        by_date: dict[str, list[dict]] = defaultdict(list)
+        for r in fac_rows:
+            d = r.get("activity_date", "")
+            if d:
+                by_date[d].append(r)
+
+        inspections = []
+        for date_str, insp_rows in by_date.items():
+            try:
+                idate = _parse_date(date_str)
+            except (ValueError, TypeError):
+                continue
+
+            violations = []
+            for r in insp_rows:
+                desc = r.get("violation_description", "")
+                if not desc:
+                    continue
+                status = r.get("violation_status", "") or r.get("cd_core_violation_status_description", "")
+                violations.append(Violation(
+                    violation_code=r.get("violation_code1", ""),
+                    violation_description=desc,
+                    violation_type="Core",
+                    item_description=desc,
+                    problem_description=desc,
+                    area_description="",
+                    is_corrected=("corrected" in status.lower() if status else False),
+                ))
+
+            result = insp_rows[0].get("cd_core_inspection_result_description1", "")
+            inspections.append(Inspection(
+                inspection_id=insp_rows[0].get("tb_core_daily_record_id1", f"smc-{key}-{idate}"),
+                inspection_date=idate,
+                inspection_type=insp_rows[0].get("cd_core_service_code_description1", ""),
+                is_in_compliance=("pass" in result.lower() if result else len(violations) == 0),
+                violations=violations,
+            ))
+
+        inspections.sort(key=lambda i: i.inspection_date, reverse=True)
+        establishments.append(Establishment(
+            establishment_id=f"smc-{hash(key) % 10**8}",
+            name=first.get("facility_name1", ""),
+            address=first.get("site_address", ""),
+            city="san_mateo",
+            zip_code=first.get("zip", ""),
+            inspections=inspections,
+        ))
+
+    return establishments
