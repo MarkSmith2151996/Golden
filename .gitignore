@@ -2,5 +2,8 @@
 __pycache__/
 *.pyc
 *.egg-info/
-data/
 .claude/
+
+# Large uncompressed CSVs (raw_data.csv.gz is tracked instead)
+data/*.csv
+!data/summary.csv
