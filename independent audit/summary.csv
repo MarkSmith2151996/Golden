@@ -1,0 +1,18 @@
+city,display_name,state,source_type,establishments,inspections,violations,compliant_inspections,noncompliant_inspections,fetch_time_sec
+austin,"Austin, TX",TX,Socrata,4725,6558,2274,4284,2274,6.6
+baton_rouge,"Baton Rouge, LA",LA,Socrata,3163,4207,14282,1230,2977,16.1
+boulder,"Boulder County, CO",CO,Socrata,521,558,35722,18,540,44.5
+chicago,"Chicago, IL",IL,Socrata,2636,3154,20790,0,3154,7.5
+cincinnati,"Cincinnati, OH",OH,Socrata,2208,4384,12184,1466,2918,15.9
+delaware,Delaware (statewide),DE,Socrata,2736,4304,13979,364,3940,13.0
+detroit,"Detroit, MI",MI,Gatsby,500,650,1258,535,115,176.6
+king_county,"King County, WA",WA,Socrata,10366,13877,20110,11963,1914,18.9
+marin,"Marin County, CA",CA,Socrata,816,1061,1468,0,1061,6.0
+montgomery_md,"Montgomery County, MD",MD,Socrata,1590,1828,2759,0,1828,2.8
+ny_state,New York State,NY,Socrata,18952,18952,18978,6947,12005,24.5
+ny_state_ag,New York State (Agriculture),NY,Socrata,14628,17349,45529,13183,4166,59.3
+nyc,"New York City, NY",NY,Socrata,18948,25590,91226,12891,12699,136.4
+pg_county_md,"Prince George's County, MD",MD,Socrata,1,1,1,0,1,1.1
+santa_clara,"Santa Clara County, CA",CA,Socrata,7787,11627,34251,27,11600,106.2
+sf,"San Francisco, CA",CA,Socrata,4285,6788,3915,2873,3915,10.7
+TOTAL,All Cities,,,93862,120888,318726,55781,65107,646.1
